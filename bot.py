@@ -1,11 +1,16 @@
 import logging
+import os
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ADMIN_ID = 5553120504
+# Беремо з environment variables
+ADMIN_ID = int(os.getenv('ADMIN_ID', '5553120504'))
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8421620746:AAErfrKNdODpr4jgaMB5-FZ6xDAJItrBKR8')
+TEAM_LINK = os.getenv('TEAM_LINK', 'https://t.me/+h4CjQYaOkIhmZjFi')
+CHANNEL_LINK = os.getenv('CHANNEL_LINK', 'https://t.me/+47T4lfz3KutlNDQy')
 
 MENU, NAME, EXPERIENCE, TEAM_TYPE, TRAFFIC_VOLUME, CONFIRM = range(6)
 
@@ -141,12 +146,12 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text="<b>🎉 Поздравляем! Твоя заявка принята!</b>\n\n"
-                     "<b>Вот ссылка на команду:</b>\n"
-                     "https://t.me/+h4CjQYaOkIhmZjFi\n\n"
-                     "<b>📢 Наш канал (обязательно подпишись):</b>\n"
-                     "https://t.me/+47T4lfz3KutlNDQy\n\n"
-                     "<b>Добро пожаловать в команду NEVADA TRAFFIC! 🚀</b>",
+                text=f"<b>🎉 Поздравляем! Твоя заявка принята!</b>\n\n"
+                     f"<b>Вот ссылка на команду:</b>\n"
+                     f"{TEAM_LINK}\n\n"
+                     f"<b>📢 Наш канал (обязательно подпишись):</b>\n"
+                     f"{CHANNEL_LINK}\n\n"
+                     f"<b>Добро пожаловать в команду NEVADA TRAFFIC! 🚀</b>",
                 parse_mode='HTML'
             )
             await query.edit_message_text(
@@ -181,9 +186,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MENU
 
 def main():
-    TOKEN = "8421620746:AAErfrKNdODpr4jgaMB5-FZ6xDAJItrBKR8"
-    
-    application = Application.builder().token(TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -205,6 +208,7 @@ def main():
     print("\n" + "="*50)
     print("🚀 БОТ NEVADA TRAFFIC РАБОТАЕТ!")
     print(f"👤 ID администратора: {ADMIN_ID}")
+    print(f"🔑 Токен: {BOT_TOKEN[:10]}...")
     print("="*50 + "\n")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
