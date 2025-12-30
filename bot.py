@@ -104,8 +104,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         "Привет! 👋\n\n"
-        "Я чат-бот команды NEVADA TRAFFIC по арбитражу трафика. Если ты хочешь "
-        "присоединиться к нашей команде, оставь заявку.",
+        "Я чат-бот принятие и отклонение заявок команды NEVADA TRAFFIC по арбитражу трафика."
+        "Новые участники проходят отбор.",
+        "Нажмите кнопку ниже, чтобы подать заявку.",
         reply_markup=reply_markup
     )
     return MENU
@@ -113,10 +114,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     
-    if text == "Подать заявку":
+    if text == "Подать заявку на вступление":
         await update.message.reply_text(
             "Спасибо за твой интерес к нашей команде.\n"
-            "Укажи свое имя.",
+            "Укажите ваше имя.",
             reply_markup=ReplyKeyboardRemove()
         )
         return NAME
@@ -138,7 +139,7 @@ async def get_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [['Соло'], ['Команда']]
     reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
     
-    await update.message.reply_text("Ты соло траффер или команда?", reply_markup=reply_markup)
+    await update.message.reply_text("Формат работы:", reply_markup=reply_markup)
     return TEAM_TYPE
 
 async def get_team_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -160,16 +161,16 @@ async def get_traffic_volume(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     context.user_data['traffic_volume'] = text
     
-    keyboard = [['ПОДАТЬ ЗАЯВКУ']]
+    keyboard = [['ОТПРАВИТЬ ЗАЯВКУ']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    await update.message.reply_text("Нажми кнопку для отправки заявки:", reply_markup=reply_markup)
+    await update.message.reply_text("Проверьте данные и отправьте заявку на рассмотрение.", reply_markup=reply_markup)
     return CONFIRM
 
 async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     
-    if text == "ПОДАТЬ ЗАЯВКУ":
+    if text == "ОТПРАВИТЬ ЗАЯВКУ":
         user_id = update.effective_user.id
         username = update.effective_user.username if update.effective_user.username else 'нет'
         
@@ -223,8 +224,11 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         
         await update.message.reply_text(
-            f"✅ Спасибо, наш модератор рассмотрит твою заявку #{app_id} и напишет тебе!\n\n"
-            "Желаю хорошего залива! 🚀💰",
+            f"Заявка отправлена.
+
+Решение принимается модератором вручную.
+В случае одобрения вы получите сообщение в этом чате.
+",
             reply_markup=reply_markup
         )
         
@@ -248,16 +252,16 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"<b>🎉 Поздравляем! Твоя заявка принята!</b>\n\n"
-                     f"<b>Вот ссылка на команду:</b>\n"
+                text=f"<b>🎉 Ваша заявка одобрена.</b>\n\n"
+                     f"<b>Ссылка на команду:</b>\n"
                      f"{TEAM_LINK}\n\n"
-                     f"<b>📢 Наш канал (обязательно подпишись):</b>\n"
+                     f"<b>📢 Обязательно подпишитесь на канал:</b>\n"
                      f"{CHANNEL_LINK}\n\n"
-                     f"<b>Добро пожаловать в команду NEVADA TRAFFIC! 🚀</b>",
+                     f"<b>Добро пожаловать в команду NEVADA TRAFFIC! </b>",
                 parse_mode='HTML'
             )
-            await query.edit_message_text(
-                text=query.message.text + "\n\n✅ ЗАЯВКА ПРИНЯТА",
+               await query.edit_message_text(
+                text=query.message.text + "\n\n❌ ЗАЯВКА ОТКЛОНЕНА",
                 reply_markup=None
             )
         except Exception as e:
@@ -270,8 +274,8 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             await context.bot.send_message(
                 chat_id=user_id,
-                text="<b>😔 К сожалению, твоя заявка не прошла отбор.</b>\n\n"
-                     "<b>Спасибо за интерес к команде NEVADA TRAFFIC!</b>\n",
+                text="<b>Ваша заявка не была одобрена.</b>\n\n"
+                     "<b>Благодарим за интерес к NEVADA TRAFFIC</b>\n",
                 parse_mode='HTML'
             )
             await query.edit_message_text(
