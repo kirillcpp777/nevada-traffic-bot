@@ -191,7 +191,6 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         application_data = (
             f"📝 <b>НОВАЯ ЗАЯВКА #{app_id} | NEVADA TRAFFIC</b>\n"
-            f"{'='*40}\n\n"
             f"👤 <b>Имя:</b> {context.user_data['name']}\n"
             f"💼 <b>Опыт:</b> {context.user_data['experience']}\n"
             f"👥 <b>Тип:</b> {context.user_data['team_type']}\n"
@@ -199,7 +198,6 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"🆔 <b>User ID:</b> {user_id}\n"
             f"📱 <b>Username:</b> @{username}\n"
             f"📅 <b>Дата:</b> {datetime.now().strftime('%d.%m.%Y %H:%M')}\n"
-            f"\n{'='*40}"
         )
         
         keyboard = [
@@ -273,8 +271,7 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
             await context.bot.send_message(
                 chat_id=user_id,
                 text="<b>😔 К сожалению, твоя заявка не прошла отбор.</b>\n\n"
-                     "<b>Спасибо за интерес к команде NEVADA TRAFFIC!</b>\n"
-                     "<b>Ты можешь попробовать еще раз позже.</b>",
+                     "<b>Спасибо за интерес к команде NEVADA TRAFFIC!</b>\n",
                 parse_mode='HTML'
             )
             await query.edit_message_text(
