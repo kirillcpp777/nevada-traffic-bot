@@ -209,7 +209,23 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MENU
 
 def main():
-    application = Application.builder().token(BOT_TOKEN).build()
+    # Налаштування параметрів підключення
+    # connect_timeout — час на встановлення зв'язку
+    # read_timeout — час на очікування відповіді від сервера
+    request_kwargs = {
+        'connect_timeout': 15.0,
+        'read_timeout': 20.0,
+    }
+
+    # Створюємо додаток з розширеними налаштуваннями
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .connect_timeout(15.0) 
+        .read_timeout(20.0)
+        .get_updates_read_timeout(42) # Збільшуємо час очікування нових повідомлень
+        .build()
+    )
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -229,7 +245,13 @@ def main():
     application.add_handler(CommandHandler('stats', stats_command))
     
     print("🚀 Бот запущен!")
-    application.run_polling()
+    
+    # Запускаємо polling з обробкою помилок мережі
+    application.run_polling(
+        drop_pending_updates=True, 
+        timeout=30, 
+        bootstrap_retries=5 # Кількість спроб підключення при старті
+    )
 
 if __name__ == '__main__':
-    main()
+    main
