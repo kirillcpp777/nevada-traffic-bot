@@ -76,9 +76,18 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(stats_text, parse_mode='HTML')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Очищуємо дані користувача, щоб почати "з чистого листа"
+    context.user_data.clear()
+    
     keyboard = [['Подать заявку']]
-    await update.message.reply_text("Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC.", 
-                                  reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True))
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    await update.message.reply_text(
+        "Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC. Новые участники проходят отбор.\n"
+        "Нажмите кнопку ниже, чтобы подать заявку.",
+        reply_markup=reply_markup
+    )
+    # Повертаємо стан MENU, щоб бот знав, що ми на початку
     return MENU
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -162,20 +171,17 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.error("Помилка:", exc_info=context.error)
 
 def main():
-    # Створюємо додаток з екстремально великими таймаутами для стабільності
+    # Оптимізовані таймаути: не ставимо занадто великі, щоб бот не "тупив"
     application = (
         Application.builder()
         .token(BOT_TOKEN)
-        .connect_timeout(30.0)  # 30 секунд на з'єднання
-        .read_timeout(30.0)     # 30 секунд на читання
-        .write_timeout(30.0)
-        .get_updates_read_timeout(42)
+        .connect_timeout(10.0)
+        .read_timeout(10.0)
         .build()
     )
     
-    # Реєстрація хендлерів (залишається як була)
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)],
+        entry_points=[CommandHandler('start', start)], # Тепер старт працює завжди
         states={
             MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler)],
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
@@ -184,7 +190,8 @@ def main():
             TRAFFIC_VOLUME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_traffic_volume)],
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_application)],
         },
-        fallbacks=[CommandHandler('cancel', cancel)],
+        fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
+        allow_reentry=True # КЛЮЧОВА ФІШКА: дозволяє перезапуск діалогу
     )
     
     application.add_handler(conv_handler)
@@ -193,19 +200,8 @@ def main():
     application.add_error_handler(error_handler)
     
     print("🚀 Бот запущен!")
-    
-    # Запуск з ігноруванням помилок мережі при старті
-    application.run_polling(
-        drop_pending_updates=True,
-        timeout=30,
-        bootstrap_retries=10  # Робимо 10 спроб підключитися замість однієї
-    )
+    # Використовуємо звичайний polling без екстремальних налаштувань
+    application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
-    import time
-    while True:
-        try:
-            main()
-        except Exception as e:
-            logger.error(f"Критична помилка: {e}. Повторна спроба через 5 секунд...")
-            time.sleep(5) # Чекаємо перед перезапуском
+    main()
