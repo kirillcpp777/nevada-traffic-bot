@@ -162,14 +162,18 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.error("Помилка:", exc_info=context.error)
 
 def main():
+    # Створюємо додаток з екстремально великими таймаутами для стабільності
     application = (
         Application.builder()
         .token(BOT_TOKEN)
-        .connect_timeout(20.0)
-        .read_timeout(20.0)
+        .connect_timeout(30.0)  # 30 секунд на з'єднання
+        .read_timeout(30.0)     # 30 секунд на читання
+        .write_timeout(30.0)
+        .get_updates_read_timeout(42)
         .build()
     )
     
+    # Реєстрація хендлерів (залишається як була)
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
         states={
@@ -189,11 +193,19 @@ def main():
     application.add_error_handler(error_handler)
     
     print("🚀 Бот запущен!")
-    application.run_polling(drop_pending_updates=True)
+    
+    # Запуск з ігноруванням помилок мережі при старті
+    application.run_polling(
+        drop_pending_updates=True,
+        timeout=30,
+        bootstrap_retries=10  # Робимо 10 спроб підключитися замість однієї
+    )
+
 if __name__ == '__main__':
-    try:
-        main()
-    except (KeyboardInterrupt, SystemExit):
-        logger.info("Бот зупинений вручну")
-    except Exception as e:
-        logger.error(f"Критична помилка при запуску: {e}")
+    import time
+    while True:
+        try:
+            main()
+        except Exception as e:
+            logger.error(f"Критична помилка: {e}. Повторна спроба через 5 секунд...")
+            time.sleep(5) # Чекаємо перед перезапуском
