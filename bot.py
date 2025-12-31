@@ -190,6 +190,10 @@ def main():
     
     print("🚀 Бот запущен!")
     application.run_polling(drop_pending_updates=True)
-
 if __name__ == '__main__':
-    main() # <--- Ось тут було виправлено (додано дужки)
+    try:
+        main()
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Бот зупинений вручну")
+    except Exception as e:
+        logger.error(f"Критична помилка при запуску: {e}")
