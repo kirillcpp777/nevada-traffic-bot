@@ -10,7 +10,7 @@ from telegram.error import TimedOut, NetworkError
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Настройки (Замініть 'ВАШ_ТОКЕН' на реальний, якщо не використовуєте Environment Variables)
+# Настройки
 ADMIN_ID = int(os.getenv('ADMIN_ID', '5553120504'))
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8421620746:AAErfrKNdODpr4jgaMB5-FZ6xDAJItrBKR8') 
 TEAM_LINK = os.getenv('TEAM_LINK', 'https://t.me/+h4CjQYaOkIhmZjFi')
@@ -20,7 +20,6 @@ DB_FILE = 'applications.json'
 
 MENU, NAME, EXPERIENCE, TEAM_TYPE, TRAFFIC_VOLUME, CONFIRM = range(6)
 
-# --- Функции БД (без змін) ---
 def load_applications():
     try:
         if os.path.exists(DB_FILE):
@@ -66,7 +65,6 @@ def get_stats():
         'pending': sum(1 for app in applications if app.get('status') == 'pending')
     }
 
-# --- Обработчики (Ваші оригінальні функції) ---
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return
     s = get_stats()
@@ -76,18 +74,14 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(stats_text, parse_mode='HTML')
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Очищуємо дані користувача, щоб почати "з чистого листа"
     context.user_data.clear()
-    
     keyboard = [['Подать заявку']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    
     await update.message.reply_text(
         "Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC. Новые участники проходят отбор.\n"
         "Нажмите кнопку ниже, чтобы подать заявку.",
         reply_markup=reply_markup
     )
-    # Повертаємо стан MENU, щоб бот знав, що ми на початку
     return MENU
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -148,22 +142,25 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    action, user_id = query.data.split('_')
-    user_id = int(user_id)
+    data = query.data.split('_')
+    action = data[0]
+    user_id = int(data[1])
+    
     if action == "accept":
         update_application_status(user_id, 'accepted')
         await context.bot.send_message(
-    chat_id=user_id, 
-    text=(
-        f"<b>🎉 Одобрено!</b>\n\n"
-        f"Команда: {TEAM_LINK}\n"
-        f"📢 <b>Подпишитесь на канал команды:</b> {CHANNEL_LINK}"
-    ), 
-    parse_mode='HTML'
-)
+            chat_id=user_id, 
+            text=(
+                f"<b>🎉 Одобрено!</b>\n\n"
+                f"Команда: {TEAM_LINK}\n"
+                f"📢 <b>Подпишитесь на канал команды:</b> {CHANNEL_LINK}"
+            ), 
+            parse_mode='HTML'
+        )
     elif action == "reject":
         update_application_status(user_id, 'rejected')
         await context.bot.send_message(chat_id=user_id, text="<b>Отклонено.</b>", parse_mode='HTML')
+    
     await query.edit_message_text(text=f"{query.message.text}\n\nЗАКРЫТО", reply_markup=None)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -171,25 +168,21 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return MENU
 
-# Глобальний обробник помилок
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     if isinstance(context.error, (TimedOut, NetworkError)):
-        logger.warning(f"Мережева затримка: {context.error}")
+        logger.warning(f"Сетевая задержка: {context.error}")
     else:
-        logger.error("Помилка:", exc_info=context.error)
+        logger.error("Ошибка:", exc_info=context.error)
 
 def main():
-    # Оптимізовані таймаути: не ставимо занадто великі, щоб бот не "тупив"
     application = (
         Application.builder()
         .token(BOT_TOKEN)
-        .connect_timeout(10.0)
-        .read_timeout(10.0)
         .build()
     )
     
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler('start', start)], # Тепер старт працює завжди
+        entry_points=[CommandHandler('start', start)],
         states={
             MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler)],
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
@@ -199,7 +192,7 @@ def main():
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_application)],
         },
         fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
-        allow_reentry=True # КЛЮЧОВА ФІШКА: дозволяє перезапуск діалогу
+        allow_reentry=True
     )
     
     application.add_handler(conv_handler)
@@ -208,7 +201,6 @@ def main():
     application.add_error_handler(error_handler)
     
     print("🚀 Бот запущен!")
-    # Використовуємо звичайний polling без екстремальних налаштувань
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
