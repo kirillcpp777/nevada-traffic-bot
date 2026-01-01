@@ -152,7 +152,15 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     user_id = int(user_id)
     if action == "accept":
         update_application_status(user_id, 'accepted')
-        await context.bot.send_message(chat_id=user_id, text=f"<b>🎉 Одобрено!</b>\n\nКоманда: {TEAM_LINK}", parse_mode='HTML')
+        await context.bot.send_message(
+    chat_id=user_id, 
+    text=(
+        f"<b>🎉 Одобрено!</b>\n\n"
+        f"Команда: {TEAM_LINK}\n"
+        f"📢 <b>Подпишитесь на канал команды:</b> {CHANNEL_LINK}"
+    ), 
+    parse_mode='HTML'
+)
     elif action == "reject":
         update_application_status(user_id, 'rejected')
         await context.bot.send_message(chat_id=user_id, text="<b>Отклонено.</b>", parse_mode='HTML')
