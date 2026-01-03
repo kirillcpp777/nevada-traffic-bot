@@ -136,24 +136,40 @@ async def get_traffic_volume(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "ОТПРАВИТЬ ЗАЯВКУ":
         user_id = update.effective_user.id
-        username = update.effective_user.username or 'нет'
+        # Экранируем спецсимволы в данных пользователя
+        username = escape(update.effective_user.username or 'нет')
+        name = escape(context.user_data['name'])
+        experience = escape(context.user_data['experience'])
+        traffic = escape(context.user_data['traffic_volume'])
         
         app_data = {
-            'user_id': user_id, 'username': username, 'name': context.user_data['name'],
-            'experience': context.user_data['experience'], 'team_type': context.user_data['team_type'],
-            'traffic_volume': context.user_data['traffic_volume']
+            'user_id': user_id, 'username': username, 'name': name,
+            'experience': experience, 'team_type': context.user_data['team_type'],
+            'traffic_volume': traffic
         }
         
         app_id = save_application(app_data)
         
-        admin_text = (f"📝 **НОВАЯ ЗАЯВКА #{app_id}**\n👤 **Имя:** {app_data['name']}\n"
-                      f"💼 **Опыт:** {app_data['experience']}\n💰 **Трафик:** {app_data['traffic_volume']}\n"
-                      f"📱 **Юзер:** @{username} (`{user_id}`)")
+        # Используем HTML вместо Markdown для надежности
+        admin_text = (
+            f"📝 <b>НОВАЯ ЗАЯВКА #{app_id}</b>\n"
+            f"👤 <b>Имя:</b> {name}\n"
+            f"💼 <b>Опыт:</b> {experience}\n"
+            f"💰 <b>Трафик:</b> {traffic}\n"
+            f"📱 <b>Юзер:</b> @{username} (<code>{user_id}</code>)"
+        )
         
         keyboard = [[InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user_id}"),
                      InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}")]]
         
-        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        # Обязательно меняем parse_mode на 'HTML'
+        await context.bot.send_message(
+            chat_id=ADMIN_ID, 
+            text=admin_text, 
+            reply_markup=InlineKeyboardMarkup(keyboard), 
+            parse_mode='HTML'
+        )
+        
         await update.message.reply_text("✅ Заявка отправлена! Ожидайте решения.", reply_markup=ReplyKeyboardMarkup([['Подать заявку']], resize_keyboard=True))
         context.user_data.clear()
         return MENU
