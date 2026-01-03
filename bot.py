@@ -1,6 +1,7 @@
 import logging
 import os
-import json
+import psycopg2
+from psycopg2.extras import RealDictCursor
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
@@ -10,76 +11,86 @@ from telegram.error import TimedOut, NetworkError
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Настройки
+# Конфигурация из переменных окружения (Railway)
 ADMIN_ID = int(os.getenv('ADMIN_ID', '5553120504'))
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8421620746:AAErfrKNdODpr4jgaMB5-FZ6xDAJItrBKR8') 
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+DATABASE_URL = os.getenv('DATABASE_URL')
 TEAM_LINK = os.getenv('TEAM_LINK', 'https://t.me/+h4CjQYaOkIhmZjFi')
 CHANNEL_LINK = os.getenv('CHANNEL_LINK', 'https://t.me/+47T4lfz3KutlNDQy')
 
-DB_FILE = 'applications.json'
-
 MENU, NAME, EXPERIENCE, TEAM_TYPE, TRAFFIC_VOLUME, CONFIRM = range(6)
 
-def load_applications():
-    try:
-        if os.path.exists(DB_FILE):
-            with open(DB_FILE, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        return []
-    except Exception as e:
-        logger.error(f"Ошибка загрузки БД: {e}")
-        return []
+# --- РАБОТА С БАЗОЙ ДАННЫХ ---
 
-def save_application(application_data):
-    try:
-        applications = load_applications()
-        app_id = len(applications) + 1
-        application_data['application_id'] = app_id
-        applications.append(application_data)
-        with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(applications, f, ensure_ascii=False, indent=2)
-        return app_id
-    except Exception as e:
-        logger.error(f"Ошибка сохранения в БД: {e}")
-        return None
+def init_db():
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor()
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS applications (
+            id SERIAL PRIMARY KEY,
+            user_id BIGINT,
+            username TEXT,
+            name TEXT,
+            experience TEXT,
+            team_type TEXT,
+            traffic_volume TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status_updated_at TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    cur.close()
+    conn.close()
+
+def save_application(data):
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor()
+    cur.execute('''
+        INSERT INTO applications (user_id, username, name, experience, team_type, traffic_volume)
+        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+    ''', (data['user_id'], data['username'], data['name'], data['experience'], 
+          data['team_type'], data['traffic_volume']))
+    app_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    return app_id
 
 def update_application_status(user_id, status):
-    try:
-        applications = load_applications()
-        for app in reversed(applications):
-            if app['user_id'] == user_id:
-                app['status'] = status
-                app['status_updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                break
-        with open(DB_FILE, 'w', encoding='utf-8') as f:
-            json.dump(applications, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        logger.error(f"Ошибка обновления статуса: {e}")
+    conn = psycopg2.connect(DATABASE_URL)
+    cur = conn.cursor()
+    cur.execute('''
+        UPDATE applications 
+        SET status = %s, status_updated_at = NOW() 
+        WHERE user_id = %s AND status = 'pending'
+    ''', (status, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def get_stats():
-    applications = load_applications()
-    return {
-        'total': len(applications),
-        'accepted': sum(1 for app in applications if app.get('status') == 'accepted'),
-        'rejected': sum(1 for app in applications if app.get('status') == 'rejected'),
-        'pending': sum(1 for app in applications if app.get('status') == 'pending')
-    }
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    cur = conn.cursor()
+    cur.execute('SELECT status, COUNT(*) as count FROM applications GROUP BY status')
+    rows = cur.fetchall()
+    stats = {'total': 0, 'accepted': 0, 'rejected': 0, 'pending': 0}
+    for row in rows:
+        stats[row['status']] = row['count']
+        stats['total'] += row['count']
+    cur.close()
+    conn.close()
+    return stats
 
-async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
-    s = get_stats()
-    stats_text = (f"📊 <b>СТАТИСТИКА NEVADA TRAFFIC</b>\n{'='*30}\n\n"
-                  f"📝 Всего заявок: <b>{s['total']}</b>\n✅ Принято: <b>{s['accepted']}</b>\n"
-                  f"❌ Отклонено: <b>{s['rejected']}</b>\n⏳ В обработке: <b>{s['pending']}</b>")
-    await update.message.reply_text(stats_text, parse_mode='HTML')
+# --- ХЕНДЛЕРЫ БОТА ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     keyboard = [['Подать заявку']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC. Новые участники проходят тщательный отбор.\n\n"
-        "⚠️ **Важно:** Пожалуйста, указывайте только настоящие данные(особено сколько заливаете). Ложные анкеты отклоняются автоматически.",
+        "Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC.\n\n"
+        "❗ **ВАЖНО:** Указывайте только настоящие данные(особенно где заявки). Заявки с фейковой информацией отклоняются без объяснения причин.",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -88,23 +99,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "Подать заявку":
         await update.message.reply_text(
-            "Начинаем заполнение анкеты.\n\n"
-            "Как вас зовут?", 
+            "Начинаем заполнение анкеты.\n\n**Указывай свое настоящее имя:**", 
             reply_markup=ReplyKeyboardRemove(),
             parse_mode='Markdown'
         )
         return NAME
     return MENU
+
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['name'] = update.message.text
     await update.message.reply_text("Есть опыт в арбитраже?", 
-                                  reply_markup=ReplyKeyboardMarkup([['Да'], ['Нет']], one_time_keyboard=True, resize_keyboard=True))
+        reply_markup=ReplyKeyboardMarkup([['Да'], ['Нет']], one_time_keyboard=True, resize_keyboard=True))
     return EXPERIENCE
 
 async def get_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['experience'] = update.message.text
     await update.message.reply_text("Формат работы:", 
-                                  reply_markup=ReplyKeyboardMarkup([['Соло'], ['Команда']], one_time_keyboard=True, resize_keyboard=True))
+        reply_markup=ReplyKeyboardMarkup([['Соло'], ['Команда']], one_time_keyboard=True, resize_keyboard=True))
     return TEAM_TYPE
 
 async def get_team_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -118,28 +129,32 @@ async def get_traffic_volume(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Пожалуйста, введите только число.")
         return TRAFFIC_VOLUME
     context.user_data['traffic_volume'] = text
-    await update.message.reply_text("Проверьте данные и отправьте заявку.", 
-                                  reply_markup=ReplyKeyboardMarkup([['ОТПРАВИТЬ ЗАЯВКУ']], resize_keyboard=True))
+    await update.message.reply_text("Всё верно? Отправляй заявку, если данные настоящие.", 
+        reply_markup=ReplyKeyboardMarkup([['ОТПРАВИТЬ ЗАЯВКУ']], resize_keyboard=True))
     return CONFIRM
 
 async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "ОТПРАВИТЬ ЗАЯВКУ":
         user_id = update.effective_user.id
         username = update.effective_user.username or 'нет'
-        app_record = {
+        
+        app_data = {
             'user_id': user_id, 'username': username, 'name': context.user_data['name'],
             'experience': context.user_data['experience'], 'team_type': context.user_data['team_type'],
-            'traffic_volume': context.user_data['traffic_volume'], 'status': 'pending',
-            'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'traffic_volume': context.user_data['traffic_volume']
         }
-        app_id = save_application(app_record)
-        admin_text = (f"📝 <b>НОВАЯ ЗАЯВКА #{app_id}</b>\n👤 <b>Имя:</b> {app_record['name']}\n"
-                      f"💼 <b>Опыт:</b> {app_record['experience']}\n💰 <b>Трафик:</b> {app_record['traffic_volume']}\n"
-                      f"📱 <b>Юзер:</b> @{username} (<code>{user_id}</code>)")
+        
+        app_id = save_application(app_data)
+        
+        admin_text = (f"📝 **НОВАЯ ЗАЯВКА #{app_id}**\n👤 **Имя:** {app_data['name']}\n"
+                      f"💼 **Опыт:** {app_data['experience']}\n💰 **Трафик:** {app_data['traffic_volume']}\n"
+                      f"📱 **Юзер:** @{username} (`{user_id}`)")
+        
         keyboard = [[InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user_id}"),
                      InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}")]]
-        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='HTML')
-        await update.message.reply_text("✅ Заявка отправлена!", reply_markup=ReplyKeyboardMarkup([['Подать заявку']], resize_keyboard=True))
+        
+        await context.bot.send_message(chat_id=ADMIN_ID, text=admin_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await update.message.reply_text("✅ Заявка отправлена! Ожидайте решения.", reply_markup=ReplyKeyboardMarkup([['Подать заявку']], resize_keyboard=True))
         context.user_data.clear()
         return MENU
     return CONFIRM
@@ -148,43 +163,27 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     query = update.callback_query
     await query.answer()
     data = query.data.split('_')
-    action = data[0]
-    user_id = int(data[1])
+    action, user_id = data[0], int(data[1])
     
     if action == "accept":
         update_application_status(user_id, 'accepted')
-        await context.bot.send_message(
-            chat_id=user_id, 
-            text=(
-                f"<b>🎉 Одобрено!</b>\n\n"
-                f"Команда: {TEAM_LINK}\n"
-                f"📢 <b>Подпишитесь на канал команды:</b> {CHANNEL_LINK}"
-            ), 
-            parse_mode='HTML'
-        )
+        await context.bot.send_message(chat_id=user_id, text=f"<b>🎉 Одобрено!</b>\n\nКоманда: {TEAM_LINK}\n📢 Канал: {CHANNEL_LINK}", parse_mode='HTML')
     elif action == "reject":
         update_application_status(user_id, 'rejected')
         await context.bot.send_message(chat_id=user_id, text="<b>Отклонено.</b>", parse_mode='HTML')
     
-    await query.edit_message_text(text=f"{query.message.text}\n\nЗАКРЫТО", reply_markup=None)
+    await query.edit_message_text(text=f"{query.message.text}\n\n✅ ОБРАБОТАНО", reply_markup=None)
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Отменено.", reply_markup=ReplyKeyboardMarkup([['Подать заявку']], resize_keyboard=True))
-    context.user_data.clear()
-    return MENU
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if isinstance(context.error, (TimedOut, NetworkError)):
-        logger.warning(f"Сетевая задержка: {context.error}")
-    else:
-        logger.error("Ошибка:", exc_info=context.error)
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID: return
+    s = get_stats()
+    text = (f"📊 **СТАТИСТИКА**\n\n📝 Всего: {s['total']}\n✅ Принято: {s['accepted']}\n"
+            f"❌ Отклонено: {s['rejected']}\n⏳ В очереди: {s['pending']}")
+    await update.message.reply_text(text, parse_mode='Markdown')
 
 def main():
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .build()
-    )
+    init_db()
+    application = Application.builder().token(BOT_TOKEN).build()
     
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler('start', start)],
@@ -196,16 +195,13 @@ def main():
             TRAFFIC_VOLUME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_traffic_volume)],
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_application)],
         },
-        fallbacks=[CommandHandler('cancel', cancel), CommandHandler('start', start)],
-        allow_reentry=True
+        fallbacks=[CommandHandler('start', start)]
     )
     
     application.add_handler(conv_handler)
     application.add_handler(CallbackQueryHandler(admin_button_handler))
     application.add_handler(CommandHandler('stats', stats_command))
-    application.add_error_handler(error_handler)
     
-    print("🚀 Бот запущен!")
     application.run_polling(drop_pending_updates=True)
 
 if __name__ == '__main__':
