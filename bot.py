@@ -91,7 +91,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
         "Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC.\n\n"
-        "❗ **ВАЖНО:** Указывайте только настоящие данные(особенно где заявки)",
+        "❗ **ВАЖНО:** Указывайте только настоящие данные(особенно где заявки).\n"
+        "Нажми кнопку 'Подать заявку'",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
