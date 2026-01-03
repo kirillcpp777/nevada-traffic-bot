@@ -90,7 +90,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
         "Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC.\n\n"
-        "❗ **ВАЖНО:** Указывайте только настоящие данные(особенно где заявки). Заявки с фейковой информацией отклоняются без объяснения причин.",
+        "❗ **ВАЖНО:** Указывайте только настоящие данные(особенно где заявки)",
         reply_markup=reply_markup,
         parse_mode='Markdown'
     )
@@ -99,7 +99,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "Подать заявку":
         await update.message.reply_text(
-            "Начинаем заполнение анкеты.\n\n**Указывай свое настоящее имя:**", 
+            "Начинаем заполнение анкеты.\n\n**Укажи свое имя:**", 
             reply_markup=ReplyKeyboardRemove(),
             parse_mode='Markdown'
         )
@@ -120,7 +120,7 @@ async def get_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_team_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['team_type'] = update.message.text
-    await update.message.reply_text("Сколько трафика (дейли) вы проливаете? (Введите число):")
+    await update.message.reply_text("Сколько трафика (за неделю) вы проливаете? (Введите число):")
     return TRAFFIC_VOLUME
 
 async def get_traffic_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -129,7 +129,7 @@ async def get_traffic_volume(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Пожалуйста, введите только число.")
         return TRAFFIC_VOLUME
     context.user_data['traffic_volume'] = text
-    await update.message.reply_text("Всё верно? Отправляй заявку, если данные настоящие.", 
+    await update.message.reply_text("Всё верно? Отправляй заявку.", 
         reply_markup=ReplyKeyboardMarkup([['ОТПРАВИТЬ ЗАЯВКУ']], resize_keyboard=True))
     return CONFIRM
 
