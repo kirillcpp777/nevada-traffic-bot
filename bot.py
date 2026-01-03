@@ -78,18 +78,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [['Подать заявку']]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
-        "Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC. Новые участники проходят отбор.\n"
-        "Нажмите кнопку ниже, чтобы подать заявку.",
-        reply_markup=reply_markup
+        "Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC. Новые участники проходят тщательный отбор.\n\n"
+        "⚠️ **Важно:** Пожалуйста, указывайте только настоящие данные(особено сколько заливаете). Ложные анкеты отклоняются автоматически.",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
     )
     return MENU
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "Подать заявку":
-        await update.message.reply_text("Укажите ваше имя:", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(
+            "Начинаем заполнение анкеты.\n\n"
+            "Как вас зовут?", 
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode='Markdown'
+        )
         return NAME
     return MENU
-
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['name'] = update.message.text
     await update.message.reply_text("Есть опыт в арбитраже?", 
