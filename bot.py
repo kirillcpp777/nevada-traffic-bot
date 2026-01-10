@@ -12,8 +12,12 @@ from html import escape
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Конфигурация из переменных окружения (Railway)
-ADMIN_ID = int(os.getenv('ADMIN_ID', '5553120504'))
+# --- КОНФИГУРАЦИЯ ---
+# Добавляем ваш ID в список через запятую или используем список в коде
+PRIMARY_ADMIN = int(os.getenv('ADMIN_ID', '5553120504'))
+SECOND_ADMIN = 5309961138  # Ваш ID
+ADMIN_LIST = [PRIMARY_ADMIN, SECOND_ADMIN]
+
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 DATABASE_URL = os.getenv('DATABASE_URL')
 TEAM_LINK = os.getenv('TEAM_LINK', 'https://t.me/+h4CjQYaOkIhmZjFi')
@@ -22,7 +26,6 @@ CHANNEL_LINK = os.getenv('CHANNEL_LINK', 'https://t.me/+47T4lfz3KutlNDQy')
 MENU, NAME, EXPERIENCE, TEAM_TYPE, TRAFFIC_VOLUME, CONFIRM = range(6)
 
 # --- РАБОТА С БАЗОЙ ДАННЫХ ---
-
 def init_db():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
@@ -91,7 +94,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     await update.message.reply_text(
         "Привет! 👋\n\nЯ бот команды NEVADA TRAFFIC.\n\n"
-        "❗ **ВАЖНО:** Указывайте только настоящие данные(особенно где заявки).\n"
+        "❗ **ВАЖНО:** Указывайте только настоящие данные.\n"
         "Нажми кнопку 'Подать заявку'",
         reply_markup=reply_markup,
         parse_mode='Markdown'
@@ -138,7 +141,6 @@ async def get_traffic_volume(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.text == "ОТПРАВИТЬ ЗАЯВКУ":
         user_id = update.effective_user.id
-        # Экранируем спецсимволы в данных пользователя
         username = escape(update.effective_user.username or 'нет')
         name = escape(context.user_data['name'])
         experience = escape(context.user_data['experience'])
@@ -152,7 +154,6 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
         
         app_id = save_application(app_data)
         
-        # Используем HTML вместо Markdown для надежности
         admin_text = (
             f"📝 <b>НОВАЯ ЗАЯВКА #{app_id}</b>\n"
             f"👤 <b>Имя:</b> {name}\n"
@@ -164,13 +165,17 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
         keyboard = [[InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user_id}"),
                      InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}")]]
         
-        # Обязательно меняем parse_mode на 'HTML'
-        await context.bot.send_message(
-            chat_id=ADMIN_ID, 
-            text=admin_text, 
-            reply_markup=InlineKeyboardMarkup(keyboard), 
-            parse_mode='HTML'
-        )
+        # Рассылка всем админам
+        for admin_id in ADMIN_LIST:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id, 
+                    text=admin_text, 
+                    reply_markup=InlineKeyboardMarkup(keyboard), 
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки админу {admin_id}: {e}")
         
         await update.message.reply_text("✅ Заявка отправлена! Ожидайте решения.", reply_markup=ReplyKeyboardMarkup([['Подать заявку']], resize_keyboard=True))
         context.user_data.clear()
@@ -179,21 +184,43 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    admin_user = update.effective_user
     await query.answer()
+    
     data = query.data.split('_')
     action, user_id = data[0], int(data[1])
     
+    status_text = ""
     if action == "accept":
         update_application_status(user_id, 'accepted')
+        status_text = "✅ ПРИНЯТА"
         await context.bot.send_message(chat_id=user_id, text=f"<b>🎉 Одобрено!</b>\n\nКоманда: {TEAM_LINK}\n📢 Канал: {CHANNEL_LINK}", parse_mode='HTML')
     elif action == "reject":
         update_application_status(user_id, 'rejected')
+        status_text = "❌ ОТКЛОНЕНА"
         await context.bot.send_message(chat_id=user_id, text="<b>Отклонено.</b>", parse_mode='HTML')
     
-    await query.edit_message_text(text=f"{query.message.text}\n\n✅ ОБРАБОТАНО", reply_markup=None)
+    # Обновляем сообщение у того админа, который нажал кнопку
+    await query.edit_message_text(
+        text=f"{query.message.text}\n\n{status_text}\nАдмином: @{admin_user.username or admin_user.id}", 
+        reply_markup=None,
+        parse_mode='HTML'
+    )
+
+    # Отправляем уведомление (лог) второму админу о действии первого
+    for admin_id in ADMIN_LIST:
+        if admin_id != admin_user.id:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=f"🔔 <b>Лог действий:</b>\nАдмин @{admin_user.username or admin_user.id} изменил статус заявки пользователя <code>{user_id}</code> на {status_text}",
+                    parse_mode='HTML'
+                )
+            except:
+                pass
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID: return
+    if update.effective_user.id not in ADMIN_LIST: return
     s = get_stats()
     text = (f"📊 **СТАТИСТИКА**\n\n📝 Всего: {s['total']}\n✅ Принято: {s['accepted']}\n"
             f"❌ Отклонено: {s['rejected']}\n⏳ В очереди: {s['pending']}")
