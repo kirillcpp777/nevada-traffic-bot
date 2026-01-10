@@ -184,12 +184,13 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    admin_user = update.effective_user
+    admin_user = update.effective_user  # Тот, кто нажал на кнопку
     await query.answer()
     
     data = query.data.split('_')
     action, user_id = data[0], int(data[1])
     
+    # Определяем статус и текст для пользователя
     status_text = ""
     if action == "accept":
         update_application_status(user_id, 'accepted')
@@ -200,24 +201,39 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         status_text = "❌ ОТКЛОНЕНА"
         await context.bot.send_message(chat_id=user_id, text="<b>Отклонено.</b>", parse_mode='HTML')
     
-    # Обновляем сообщение у того админа, который нажал кнопку
+    # 1. ОБНОВЛЯЕМ СООБЩЕНИЕ У ТЕБЯ (у того, кто нажал)
+    # Теперь здесь будет твой юзернейм
+    admin_mention = f"@{admin_user.username}" if admin_user.username else f"ID: {admin_user.id}"
+    
     await query.edit_message_text(
-        text=f"{query.message.text}\n\n{status_text}\nАдмином: @{admin_user.username or admin_user.id}", 
+        text=f"{query.message.text}\n\n{status_text}\nАдмином: {admin_mention}", 
         reply_markup=None,
         parse_mode='HTML'
     )
 
-    # Отправляем уведомление (лог) второму админу о действии первого
+    # 2. ОТПРАВЛЯЕМ ЛОГ ТОЛЬКО ВТОРОМУ АДМИНУ
+    # Ищем в базе или в сообщении юзернейм того, кого обрабатываем
+    # Попробуем достать юзернейм пользователя из текста сообщения (он там после "Юзер: @...")
+    try:
+        user_info = query.message.text.split("Юзер: ")[1].split(" (")[0]
+    except:
+        user_info = f"ID {user_id}"
+
+    log_message = (
+        f"🔔 <b>Лог действий:</b>\n"
+        f"Админ {admin_mention} изменил статус заявки пользователя <b>{user_info}</b> на {status_text}"
+    )
+
     for admin_id in ADMIN_LIST:
-        if admin_id != admin_user.id:
+        if admin_id != admin_user.id:  # Если это НЕ тот админ, который нажал кнопку
             try:
                 await context.bot.send_message(
                     chat_id=admin_id,
-                    text=f"🔔 <b>Лог действий:</b>\nАдмин @{admin_user.username or admin_user.id} изменил статус заявки пользователя <code>{user_id}</code> на {status_text}",
+                    text=log_message,
                     parse_mode='HTML'
                 )
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Не удалось отправить лог админу {admin_id}: {e}")
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_LIST: return
