@@ -85,6 +85,16 @@ def get_stats():
     cur.close()
     conn.close()
     return stats
+    
+def get_application_status(user_id):
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    cur = conn.cursor()
+    # Ищем самую свежую заявку пользователя
+    cur.execute('SELECT status FROM applications WHERE user_id = %s ORDER BY created_at DESC LIMIT 1', (user_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row['status'] if row else None
 
 # --- ХЕНДЛЕРЫ БОТА ---
 
@@ -184,36 +194,56 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    admin_user = update.effective_user  # Тот, кто нажал на кнопку
-    await query.answer()
+    admin_user = update.effective_user
     
+    # Извлекаем данные из кнопки
     data = query.data.split('_')
     action, user_id = data[0], int(data[1])
+
+    # --- ПРОВЕРКА: не была ли заявка уже обработана? ---
+    current_status = get_application_status(user_id)
     
-    # Определяем статус и текст для пользователя
+    if current_status != 'pending':
+        await query.answer("⚠️ Эта заявка уже была обработана другим администратором!", show_alert=True)
+        # Убираем кнопки у этого админа, чтобы он не пытался нажать снова
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
+    # --------------------------------------------------
+
+    await query.answer()
+    
     status_text = ""
     if action == "accept":
         update_application_status(user_id, 'accepted')
         status_text = "✅ ПРИНЯТА"
-        await context.bot.send_message(chat_id=user_id, text=f"<b>🎉 Одобрено!</b>\n\nКоманда: {TEAM_LINK}\n📢 Канал: {CHANNEL_LINK}", parse_mode='HTML')
+        try:
+            await context.bot.send_message(
+                chat_id=user_id, 
+                text=f"<b>🎉 Одобрено!</b>\n\nКоманда: {TEAM_LINK}\n📢 Канал: {CHANNEL_LINK}", 
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+            
     elif action == "reject":
         update_application_status(user_id, 'rejected')
         status_text = "❌ ОТКЛОНЕНА"
-        await context.bot.send_message(chat_id=user_id, text="<b>Отклонено.</b>", parse_mode='HTML')
+        try:
+            await context.bot.send_message(chat_id=user_id, text="<b>Отклонено.</b>", parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
     
-    # 1. ОБНОВЛЯЕМ СООБЩЕНИЕ У ТЕБЯ (у того, кто нажал)
-    # Теперь здесь будет твой юзернейм
+    # Имя админа для лога
     admin_mention = f"@{admin_user.username}" if admin_user.username else f"ID: {admin_user.id}"
     
+    # 1. Обновляем сообщение у того админа, который нажал (кнопки исчезнут)
     await query.edit_message_text(
         text=f"{query.message.text}\n\n{status_text}\nАдмином: {admin_mention}", 
         reply_markup=None,
         parse_mode='HTML'
     )
 
-    # 2. ОТПРАВЛЯЕМ ЛОГ ТОЛЬКО ВТОРОМУ АДМИНУ
-    # Ищем в базе или в сообщении юзернейм того, кого обрабатываем
-    # Попробуем достать юзернейм пользователя из текста сообщения (он там после "Юзер: @...")
+    # 2. Логирование для остальных админов
     try:
         user_info = query.message.text.split("Юзер: ")[1].split(" (")[0]
     except:
@@ -225,13 +255,9 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     )
 
     for admin_id in ADMIN_LIST:
-        if admin_id != admin_user.id:  # Если это НЕ тот админ, который нажал кнопку
+        if admin_id != admin_user.id:  # Отправляем всем, кроме того, кто нажал
             try:
-                await context.bot.send_message(
-                    chat_id=admin_id,
-                    text=log_message,
-                    parse_mode='HTML'
-                )
+                await context.bot.send_message(chat_id=admin_id, text=log_message, parse_mode='HTML')
             except Exception as e:
                 logger.error(f"Не удалось отправить лог админу {admin_id}: {e}")
 
