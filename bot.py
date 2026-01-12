@@ -5,7 +5,6 @@ from psycopg2.extras import RealDictCursor
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
-from telegram.error import TimedOut, NetworkError
 from html import escape
 
 # Настройка логирования
@@ -13,9 +12,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 logger = logging.getLogger(__name__)
 
 # --- КОНФИГУРАЦИЯ ---
-# Добавляем ваш ID в список через запятую или используем список в коде
 PRIMARY_ADMIN = int(os.getenv('ADMIN_ID', '5553120504'))
-SECOND_ADMIN = 5309961138  # Ваш ID
+SECOND_ADMIN = 5309961138 
 ADMIN_LIST = [PRIMARY_ADMIN, SECOND_ADMIN]
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -23,12 +21,14 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 TEAM_LINK = os.getenv('TEAM_LINK', 'https://t.me/+h4CjQYaOkIhmZjFi')
 CHANNEL_LINK = os.getenv('CHANNEL_LINK', 'https://t.me/+47T4lfz3KutlNDQy')
 
-MENU, NAME, EXPERIENCE, TEAM_TYPE, TRAFFIC_VOLUME, CONFIRM = range(6)
+# Добавлено состояние SOURCE, всего теперь 7 состояний (0-6)
+MENU, NAME, EXPERIENCE, TEAM_TYPE, TRAFFIC_VOLUME, SOURCE, CONFIRM = range(7)
 
 # --- РАБОТА С БАЗОЙ ДАННЫХ ---
 def init_db():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
+    # Создание таблицы, если её нет
     cur.execute('''
         CREATE TABLE IF NOT EXISTS applications (
             id SERIAL PRIMARY KEY,
@@ -43,6 +43,18 @@ def init_db():
             status_updated_at TIMESTAMP
         )
     ''')
+    
+    # БЕЗОПАСНОЕ ОБНОВЛЕНИЕ: Проверяем наличие колонки source, чтобы не удалить данные
+    cur.execute('''
+        DO $$ 
+        BEGIN 
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                           WHERE table_name='applications' AND column_name='source') THEN 
+                ALTER TABLE applications ADD COLUMN source TEXT; 
+            END IF; 
+        END $$;
+    ''')
+    
     conn.commit()
     cur.close()
     conn.close()
@@ -51,10 +63,10 @@ def save_application(data):
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     cur.execute('''
-        INSERT INTO applications (user_id, username, name, experience, team_type, traffic_volume)
-        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+        INSERT INTO applications (user_id, username, name, experience, team_type, traffic_volume, source)
+        VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
     ''', (data['user_id'], data['username'], data['name'], data['experience'], 
-          data['team_type'], data['traffic_volume']))
+          data['team_type'], data['traffic_volume'], data['source']))
     app_id = cur.fetchone()[0]
     conn.commit()
     cur.close()
@@ -89,7 +101,6 @@ def get_stats():
 def get_application_status(user_id):
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     cur = conn.cursor()
-    # Ищем самую свежую заявку пользователя
     cur.execute('SELECT status FROM applications WHERE user_id = %s ORDER BY created_at DESC LIMIT 1', (user_id,))
     row = cur.fetchone()
     cur.close()
@@ -144,6 +155,12 @@ async def get_traffic_volume(update: Update, context: ContextTypes.DEFAULT_TYPE)
         await update.message.reply_text("Пожалуйста, введите только число.")
         return TRAFFIC_VOLUME
     context.user_data['traffic_volume'] = text
+    # Переход к новому вопросу
+    await update.message.reply_text("Откуда ты о нас узнал?")
+    return SOURCE
+
+async def get_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['source'] = update.message.text
     await update.message.reply_text("Всё верно? Отправляй заявку.", 
         reply_markup=ReplyKeyboardMarkup([['ОТПРАВИТЬ ЗАЯВКУ']], resize_keyboard=True))
     return CONFIRM
@@ -152,30 +169,31 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
     if update.message.text == "ОТПРАВИТЬ ЗАЯВКУ":
         user_id = update.effective_user.id
         username = escape(update.effective_user.username or 'нет')
-        name = escape(context.user_data['name'])
-        experience = escape(context.user_data['experience'])
-        traffic = escape(context.user_data['traffic_volume'])
         
         app_data = {
-            'user_id': user_id, 'username': username, 'name': name,
-            'experience': experience, 'team_type': context.user_data['team_type'],
-            'traffic_volume': traffic
+            'user_id': user_id, 
+            'username': username, 
+            'name': escape(context.user_data.get('name', 'Не указано')),
+            'experience': escape(context.user_data.get('experience', 'Не указано')), 
+            'team_type': context.user_data.get('team_type', 'Не указано'),
+            'traffic_volume': escape(context.user_data.get('traffic_volume', '0')),
+            'source': escape(context.user_data.get('source', 'Не указано'))
         }
         
         app_id = save_application(app_data)
         
         admin_text = (
             f"📝 <b>НОВАЯ ЗАЯВКА #{app_id}</b>\n"
-            f"👤 <b>Имя:</b> {name}\n"
-            f"💼 <b>Опыт:</b> {experience}\n"
-            f"💰 <b>Трафик:</b> {traffic}\n"
+            f"👤 <b>Имя:</b> {app_data['name']}\n"
+            f"💼 <b>Опыт:</b> {app_data['experience']}\n"
+            f"💰 <b>Трафик:</b> {app_data['traffic_volume']}\n"
+            f"ℹ️ <b>Источник:</b> {app_data['source']}\n"
             f"📱 <b>Юзер:</b> @{username} (<code>{user_id}</code>)"
         )
         
         keyboard = [[InlineKeyboardButton("✅ Принять", callback_data=f"accept_{user_id}"),
-                     InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}")]]
+                      InlineKeyboardButton("❌ Отклонить", callback_data=f"reject_{user_id}")]]
         
-        # Рассылка всем админам
         for admin_id in ADMIN_LIST:
             try:
                 await context.bot.send_message(
@@ -187,7 +205,8 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception as e:
                 logger.error(f"Ошибка отправки админу {admin_id}: {e}")
         
-        await update.message.reply_text("✅ Заявка отправлена! Ожидайте решения.", reply_markup=ReplyKeyboardMarkup([['Подать заявку']], resize_keyboard=True))
+        await update.message.reply_text("✅ Заявка отправлена! Ожидайте решения.", 
+                                       reply_markup=ReplyKeyboardMarkup([['Подать заявку']], resize_keyboard=True))
         context.user_data.clear()
         return MENU
     return CONFIRM
@@ -195,20 +214,14 @@ async def confirm_application(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     admin_user = update.effective_user
-    
-    # Извлекаем данные из кнопки
     data = query.data.split('_')
     action, user_id = data[0], int(data[1])
 
-    # --- ПРОВЕРКА: не была ли заявка уже обработана? ---
     current_status = get_application_status(user_id)
-    
     if current_status != 'pending':
-        await query.answer("⚠️ Эта заявка уже была обработана другим администратором!", show_alert=True)
-        # Убираем кнопки у этого админа, чтобы он не пытался нажать снова
+        await query.answer("⚠️ Эта заявка уже была обработана!", show_alert=True)
         await query.edit_message_reply_markup(reply_markup=None)
         return
-    # --------------------------------------------------
 
     await query.answer()
     
@@ -223,7 +236,7 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
                 parse_mode='HTML'
             )
         except Exception as e:
-            logger.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+            logger.error(f"Уведомление пользователю {user_id} не отправлено: {e}")
             
     elif action == "reject":
         update_application_status(user_id, 'rejected')
@@ -231,35 +244,27 @@ async def admin_button_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         try:
             await context.bot.send_message(chat_id=user_id, text="<b>Отклонено.</b>", parse_mode='HTML')
         except Exception as e:
-            logger.error(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
+            logger.error(f"Уведомление пользователю {user_id} не отправлено: {e}")
     
-    # Имя админа для лога
     admin_mention = f"@{admin_user.username}" if admin_user.username else f"ID: {admin_user.id}"
     
-    # 1. Обновляем сообщение у того админа, который нажал (кнопки исчезнут)
     await query.edit_message_text(
         text=f"{query.message.text}\n\n{status_text}\nАдмином: {admin_mention}", 
         reply_markup=None,
         parse_mode='HTML'
     )
 
-    # 2. Логирование для остальных админов
-    try:
-        user_info = query.message.text.split("Юзер: ")[1].split(" (")[0]
-    except:
-        user_info = f"ID {user_id}"
-
     log_message = (
         f"🔔 <b>Лог действий:</b>\n"
-        f"Админ {admin_mention} изменил статус заявки пользователя <b>{user_info}</b> на {status_text}"
+        f"Админ {admin_mention} изменил статус заявки пользователя ID {user_id} на {status_text}"
     )
 
     for admin_id in ADMIN_LIST:
-        if admin_id != admin_user.id:  # Отправляем всем, кроме того, кто нажал
+        if admin_id != admin_user.id:
             try:
                 await context.bot.send_message(chat_id=admin_id, text=log_message, parse_mode='HTML')
             except Exception as e:
-                logger.error(f"Не удалось отправить лог админу {admin_id}: {e}")
+                logger.error(f"Лог админу {admin_id} не отправлен: {e}")
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id not in ADMIN_LIST: return
@@ -280,6 +285,7 @@ def main():
             EXPERIENCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_experience)],
             TEAM_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_team_type)],
             TRAFFIC_VOLUME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_traffic_volume)],
+            SOURCE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_source)], # Добавлено сюда
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_application)],
         },
         fallbacks=[CommandHandler('start', start)]
