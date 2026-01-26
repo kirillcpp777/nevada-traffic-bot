@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # --- КОНФИГУРАЦИЯ ---
 PRIMARY_ADMIN = int(os.getenv('ADMIN_ID', '5553120504'))
-SECOND_ADMIN = 5309961138 
+SECOND_ADMIN = 5553120504
 ADMIN_LIST = [PRIMARY_ADMIN, SECOND_ADMIN]
 
 BOT_TOKEN = os.getenv('BOT_TOKEN')
